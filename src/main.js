@@ -1,5 +1,5 @@
 const { init, uploadToArweave, getWalletAddress } = require("./common");
-const { sendAction, getInbox } = require("./aos");
+const { sendAction, sendActionExtra, getInbox } = require("./aos");
 
 // const fs = require("fs");
 
@@ -32,11 +32,85 @@ const tryShowConnected = async() => {
     }
 };
 
-const loadPosts = async() => {
-    const resdata = await sendAction("GetPostsReverse", "");
-    console.log('loadPosts', {resdata});
+let loadingPosts = false;
 
-    $('#posts').html('');
+const loadPosts = async() => {
+    if (loadingPosts) {
+        return;
+    }
+
+    loadingPosts = true;
+
+    try {
+        const resdata = await sendAction("GetPostsReverse", "");
+        console.log('loadPosts', {resdata});
+
+        $('#posts').html('');
+
+        resdata.Messages[0].Tags.forEach(tag => {
+            if (tag.Nick) {
+                const nick = tag.Nick;
+                const time = tag.Time;
+                const data = tag.Data;
+                const from = tag.From;
+                const id = tag.Id;
+
+                renderPost(id, nick, time, data, from);
+            } else {
+                console.log("Skipping tag", {tag});
+            }
+        });
+
+        await loadComments();
+
+    } catch(e) {
+        console.log("Error loading posts", e);
+        loadingPosts = false;
+    }
+
+    loadingPosts = false;
+};
+
+const renderComment = (nick, time, data, from, postid, hashed) => {
+    // check if hashed is already rendered
+    if ($('.comment-'+hashed).length > 0) {
+        return;
+    }
+
+    const comment = $('<div class="comment comment-'+hashed+'"></div>');
+    const commentFrom = $('<div class="comment-from"></div>');
+    const commentMessage = $('<div class="comment-message"></div>');
+
+    commentFrom.html('@' + nick + ':');
+
+    const hash = data.replace(/[^a-zA-Z0-9]/g, '');
+    const cont = getContentImmediately(data, hash);
+    commentMessage.html("<div class='content-"+hash+"'>"+cont+"</div>");
+
+    comment.append(commentFrom);
+    comment.append(commentMessage);
+
+    $('.comments-'+postid).append(comment);
+
+    loadContent(data, hash);
+
+    if (!commentsCache[postid]) {
+        commentsCache[postid] = [];
+    }
+
+    commentsCache[postid].push({nick, time, data, from, postid, hashed});
+}
+
+const loadComments = async() => {
+    // first, render from cache
+    for (let postid in commentsCache) {
+        commentsCache[postid].forEach(comment => {
+            renderComment(comment.nick, comment.time, comment.data, comment.from, comment.postid, comment.hashed);
+        });
+    }
+
+    const resdata = await sendAction("GetComments", "");
+    console.log('loadComments', {resdata});
 
     resdata.Messages[0].Tags.forEach(tag => {
         if (tag.Nick) {
@@ -44,9 +118,11 @@ const loadPosts = async() => {
             const time = tag.Time;
             const data = tag.Data;
             const from = tag.From;
-            const id = tag.Id;
+            const postid = tag.PostId;
 
-            renderPost(id, nick, time, data, from);
+            const hashed = (data + from + postid + time).replace(/[^a-zA-Z0-9]/g, '');
+
+            renderComment(nick, time, data, from, postid, hashed);
         } else {
             console.log("Skipping tag", {tag});
         }
@@ -72,6 +148,7 @@ const loadPosts = async() => {
 </div> */}
 
 let contentCache = {};
+let commentsCache = {};
 
 const loadContent = async(txid, hash) => {
     if (contentCache[hash]) {
@@ -100,7 +177,8 @@ const renderPost = (id, nick, time, data, from) => {
     const post = $('<div class="post"></div>');
     const fromDiv = $('<div class="from"></div>');
     const messageDiv = $('<div class="message"></div>');
-    const commentsDiv = $('<div class="comments"></div>');
+    const commentsDiv = $('<div class="comments comments-'+id+'"></div>');
+    const commentsAfterDiv = $('<div class="comments-after"></div>');
 
     fromDiv.html('@' + nick + ' &middot; ' + time);
     const hash = data.replace(/[^a-zA-Z0-9]/g, '');
@@ -118,36 +196,37 @@ const renderPost = (id, nick, time, data, from) => {
     post.append(messageDiv);
     post.append('<hr>');
     post.append(commentsDiv);
+    post.append(commentsAfterDiv);
 
     $('#posts').append(post);
 
-    const renderComment = (nick, time, data, from) => {
-        const comment = $('<div class="comment"></div>');
-        const commentFrom = $('<div class="comment-from"></div>');
-        const commentMessage = $('<div class="comment-message"></div>');
+    // const renderComment = (nick, time, data, from) => {
+    //     const comment = $('<div class="comment"></div>');
+    //     const commentFrom = $('<div class="comment-from"></div>');
+    //     const commentMessage = $('<div class="comment-message"></div>');
 
-        commentFrom.html('@' + nick + ' &middot; ' + time);
-        const hash = data.replace(/[^a-zA-Z0-9]/g, '');
-        commentMessage.html("<div class='content-"+hash+"'></div>");
-        loadContent(data, hash);
+    //     commentFrom.html('@' + nick + ' &middot; ' + time);
+    //     const hash = data.replace(/[^a-zA-Z0-9]/g, '');
+    //     commentMessage.html("<div class='content-"+hash+"'></div>");
+    //     loadContent(data, hash);
 
-        comment.append(commentFrom);
-        comment.append(commentMessage);
+    //     comment.append(commentFrom);
+    //     comment.append(commentMessage);
 
-        commentsDiv.append(comment);
-    };
+    //     commentsDiv.append(comment);
+    // };
 
     const renderLeaveComment = () => {
         const leaveComment = $('<div class="leave-comment"></div>');
         const inputGroup = $('<div class="input-group input-group-sm"></div>');
-        const input = $('<input type="text" placeholder="leave a comment" class="form-control form-control-sm" />');
-        const button = $('<button type="button" class="btn btn-primary btn-sm">comment</button>');
+        const input = $('<input type="text" placeholder="leave a comment" class="form-control form-control-sm txt-comment" data-id="'+id+'" />');
+        const button = $('<button type="button" class="btn btn-primary btn-sm btn-comment" data-id="'+id+'">comment</button>');
 
         inputGroup.append(input);
         inputGroup.append(button);
         leaveComment.append(inputGroup);
 
-        commentsDiv.append(leaveComment);
+        commentsAfterDiv.append(leaveComment);
     };
 
     renderLeaveComment();
@@ -226,6 +305,43 @@ $(async() => {
             console.log('Deployed at https://arweave.net/' + hash);
             e.preventDefault();
         }
+    });
+
+    $(document).on('keypress', '.txt-comment', async(e) => {
+        if (e.which == 13) {
+            // click the nearest button
+            $(e.target).parent().find('.btn-comment').click();
+        }
+    });
+
+    $(document).on('click', '.btn-comment', async(e) => {
+        const id = $(e.target).attr('data-id');
+        let txt = $(e.target).parent().find('.txt-comment').val();
+        txt = txt.trim();
+        if (txt.length < 1) {
+            alert("Comment can't be empty");
+            return;
+        }
+
+        // lock
+        $(e.target).attr('disabled', true);
+        $(e.target).parent().find('.txt-comment').attr('disabled', true);
+
+        // upload
+        const hash = await uploadToArweave(txt);
+        console.log('Uploaded comment at https://arweave.net/' + hash);
+
+        // send action
+        const resdata = await sendActionExtra("Comment", hash, {PostId: id});
+        console.log('Comment result', {resdata});
+
+        // load comments
+        loadComments();
+
+        // unlock
+        $(e.target).attr('disabled', false);
+        $(e.target).parent().find('.txt-comment').attr('disabled', false);
+        $(e.target).parent().find('.txt-comment').val('');
     });
 
     $(document).on('keypress', '#nickname', async(e) => {

@@ -22,7 +22,7 @@ async function doSpawn() {
     
     const signer = createDataItemSigner(window.arweaveWallet);
 
-    PROCESS_ID = 'ahTrkxktyEtFsg2ueU8ut0p6DrVh5UoEiVgIT4n9n3g';
+    PROCESS_ID = '4nun5UrnY1Jz_kdCZNxaINchEBWnKIZ_n1r9n2dNPYQ';
     return;
 
     const res = await connection.spawn({
@@ -103,6 +103,47 @@ const sendAction = async(action, data, attempt) => {
     }
 }
 
+const sendActionExtra = async(action, data, extra, attempt) => {
+
+    if (!spawned) await doSpawn();
+
+    try {
+        let tags = 
+            [
+                { name: "Action", value: action },
+                { name: "Target", value: PROCESS_ID }
+            ];
+
+        for (let key in extra) {
+            tags.push({name: key, value: extra[key]});
+        }
+
+        console.log("sendActionExtra", {action, data, extra});
+        const signer = createDataItemSigner(window.arweaveWallet);
+    
+        const res = await connection.message({
+            process: PROCESS_ID,
+            signer,
+            tags,
+            data: data,
+          });
+    
+          console.log({action, data, res});
+    
+          const resdata = await getResult(res);
+    
+          console.log({resdata});
+          return resdata;    
+    } catch(e) {
+        if (attempt > 3) {
+            throw e;
+        } else {
+            console.log("Retrying action...");
+            return sendActionExtra(action, data, extra, attempt + 1);
+        }
+    }
+}
+
 async function getInbox() {
     const resdata = await sendAction("Eval", "Inbox");
     const inbox = resdata.Output.data;
@@ -112,5 +153,8 @@ async function getInbox() {
     return json;
 }
 
+window.getInbox = getInbox;
+window.sendAction = sendAction;
+window.sendActionExtra = sendActionExtra;
 
-export { sendAction, getInbox };
+export { sendAction, getInbox, sendActionExtra };

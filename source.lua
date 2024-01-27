@@ -1,5 +1,6 @@
 Users = Users or {}
 Posts = Posts or {}
+Comments = Comments or {}
 -- index to store comments by PostId
 CommentsByPostId = CommentsByPostId or {}
 
@@ -194,6 +195,27 @@ Handlers.add(
         local offset = msg.Offset or 1
 
         local result = GetCommentsByPostId(postid, limit, offset)
+
+        Handlers.utils.reply(result)(msg)
+    end
+)
+
+-- get all comments
+Handlers.add(
+    "getComments",
+    Handlers.utils.hasMatchingTag("Action", "GetComments"),
+    function (msg)
+        local limit = msg.Limit or #Comments
+        local offset = msg.Offset or 1
+
+        local result = {}
+        for i=offset, offset+limit-1 do
+            if Comments[i] then
+                table.insert(result, Comments[i])
+            else
+                break
+            end
+        end
 
         Handlers.utils.reply(result)(msg)
     end
